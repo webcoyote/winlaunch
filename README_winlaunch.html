@@ -1,0 +1,447 @@
+<a href="software.html">&bull; Software</a>
+<a href="utility_corner.html">&bull; Utility corner</a>
+
+<p>
+
+<img src="cygwin_logo.png" align="left" alt="Cygwin logo" hspace="20"/>
+
+<h1>winlaunch -- a utility for making it easier to run Windows GUI applications from the Cygwin prompt</h1>
+
+Version 0.2c, February 2015.
+
+<h3>The problem</h3>
+
+Cygwin provides a Unix-like command line interface on Microsoft Windows
+platforms. Those of us who are used to working with the command line
+frequently find such a way of working preferable to the use of graphical tools.
+A large number of GNU/Linux utilities have been ported to Cygwin, but
+there are inevitably problems integrating the command line with native
+Windows applications. It would be nice, for example, to open firefox
+to view an HTML file like this:
+
+<pre>
+$ firefox /docs/something.html 
+</pre>
+
+Or, perhaps, to launch the SMPlayer media player like this:
+
+<pre>
+$ smplayer /media/music/something/*.mp3
+</pre>
+
+
+It is certainly possible to launch native Windows
+applications from the Cygwin prompt, but there are two immediate problems.
+<p/>
+First, the installation directories of most Windows applications are not 
+usually listed on the $PATH seen by Cygwin. This problem is easy to 
+overcome by either making a symbolic link from the program's installation
+directory to (say) <code>/usr/bin</code>, or by implementing a script
+in <code>/usr/bin</code>
+<p/>
+The second problem is much less tractable: native Windows filename formats
+are different from those used by Unix. Moreover, Cygwin has its own file
+naming conventions (e.g., <code>c:\foo.bat</code> is typically 
+<code>/cygdrive/c/foo.bat</code>). Cygwin provides a file mapping utility
+<code>cygpath</code> to address this problem. So I could, in principle,
+launch firefox with a particular file like this:
+
+<pre>
+$ firefox `cygpath -w /docs/something.html` 
+</pre>
+
+Not only is this ugly, it is prone to fail when the command line argument 
+contains wildcards (e.g., <code>*.mp3</code>). <code>Cygpath</code> will 
+expand wildcards, but if the path contains spaces, the output will be 
+completely garbled -- the spaces between arguments become indistinguishable
+from the spaces in the paths. 
+<p/>
+Although the 
+facility is rarely used directly, many Windows applications do accept
+filenames as command-line arguments, and if you mostly work at the 
+command line, it makes sense to be able to run Windows applications this
+way where appropriate. <code>winlaunch</code> is a simple utility to make this task
+a bit easier. It is primarily intended to be used within shell scripts, but
+it can be invoked directly on the command line. One reason for invoking it
+directly is to invoke the Windows default handler for a file, rather than
+specifying an application. For example
+<pre>
+$ winlaunch /home/fred/myfile.txt
+</pre>
+<p/>
+will attempt to launch the default 'open' handler for files with extension
+<code>.txt</code> -- typically Notepad or Write, unless you've specified
+a different one.
+<p/>
+I would have thought that Cygwin would have some built-in utility for
+simplifying the launching of Windows applications that take filename
+arguments but, so far as I can tell, it does not. 
+
+
+<h3>How winlaunch (sometimes) solves the problem</h3>
+
+What is required is a utility that can iterate over the list of
+arguments supplied on the command line and, for each one that looks
+like a filename, convert it into Windows format. This utility can then
+be called in a script to launch the native Windows application with
+Windows-format filenames.
+For example, on my system a script to launch OpenOffice with an (optional)
+list of files looks like this:
+
+<pre>
+#!/bin/bash
+winlaunch "/cygdrive/c/Program Files (x86)/OpenOffice.org 3/program/soffice.exe" "$@"
+</pre>
+
+This script is saved as <code>/usr/bin/ooffice</code>.
+<p/>
+Note that the first argument to <code>winlaunch</code> is the Windows binary,
+in Cygwin format, not Windows format. The script takes a list of arguments
+which are also in Cygwin format. The script would be run like this:
+
+<pre>
+$ ooffice /home/fred/docs/test.odt 
+</pre>
+
+It will also work correctly with wildcards, because the Cygwin shell expands
+the wildcards and supplies the full list of arguments to <code>winlaunch</code>.
+<p/>
+Of course, not all arguments supplied to an application will be filenames.
+An approach like the one adopted by <code>winlaunch</code> only works to
+the extent that it is possible to distinguish filenames from other
+things. Fortunately, most arguments supplied to Windows applications are
+like to be filenames. Situations in which the <code>winlaunch</code> 
+approach will fail are 
+discussed below.
+
+<h3>winlaunch implementation</h3>
+
+<code>winlauch</code> could probably be cooked up as a shell script or a
+perl script. The problem here is the handling of spaces and special
+characters in filenames. The utility would need to spawn a shell to
+run the actual application and, if there are spaces in the pathname
+(and there usually are, with Windows applications), the correct
+escaping and quoting would need to be applied. That's surprisingly
+troublesome in an application like this -- certainly beyond my shell
+hacking skills. So I have implemented <code>winlaunch</code> in C.
+It's relatively short -- under 200 lines of code -- because the hard
+work is done by invoking the Cygwin API to do the actual filename
+conversions. Using C means we can use <code>exec()</code>
+to launch the application with an array of strings as arguments. This
+avoids all the hassle with escaping spaces and what-nots that plague
+shell and perl scripts. <code>winlaunch</code> can also use the Windows
+API function <code>ShellExecute</code> to invoke applications, and it is
+this that gives it the ability to launch a document, rather than an
+executable. This feature will be described in more detail below. 
+
+<p/>
+The source code, and binary, are available at the links given at the
+end of this page. 
+
+
+<h3>How winlaunch (sometimes) doesn't solve the problem</h3>
+
+The harsh reality is that <code>winlaunch</code> is trying to solve an
+intractable problem -- there is simply no way for a general-purpose utility
+to distinguish filenames from non-filenames. Some Windows utilities 
+use '/' as a switch character, much as Unix uses '-' or '--'. 
+<code>winlaunch</code> simply has no way to distinguish a
+command line switch '/help' from a file called '/help'. It might seem that
+a simple solution is to see if the argument corresponds to a file that
+exists on the system but that, too, will fail -- some utilities 
+legitimately take as input filenames that don't have corresponding files.
+For example, to run <code>lame</code> to convert a WAV file to MP3, I
+might want to do:
+
+<pre>
+$ lame /path/to/something.wav /path/to/something.mp3
+</pre>
+
+The file <code>something.mp3</code> need not exist, but if we don't 
+convert the pathname we end up with something that makes no sense to the
+(Windows) <code>lame</code> utility. The same problem potentially 
+affects many other applications.
+<p/>
+<code>winlaunch</code> will aggressively convert filenames -- so long
+as something looks like it might be a filename, it gets converted. This
+seems to me to be the right approach because, if I'm launching a Windows
+application from the command line, most likely the arguments are filenames.
+There are two exceptions. First, an argument that starts with a '-' will
+not be converted, as this will 
+rarely be a filename. 
+An attempt
+to perform such a conversion would most likely fail anyway because, when
+command line arguments do references filenames 
+(e.g., <code>-outfile=out.txt</code>) there is no generic way to extrace the
+filename component from the rest of the argument. Second, any argument
+that contains '//' is assumed to be a URL, and not converted. 
+<p/>
+Another failure case, which seems unlikely to arise in practice, is the
+use of unexpanded wildcards as arguments. Some programs do their own
+wildcard expansion, and expect the command-line to supply the wildcards
+intact. A common example is the unix <code>find</code> utility:
+
+<pre>
+$ find . -name "*.mp3"
+</pre>
+
+The use of the double-quotes here is to <i>prevent</i> the shell expanding
+the wildcard, which <code>find</code> handles internally. I suspect that
+such a problem is unlikely to arise in practice with Windows applications.
+
+<p/>
+A further complication is the use of arguments  
+that are lists of files separated by (typically) colons. In these
+cases, it is usually necessary to modify the separator as well, which
+creates additional complications.
+<p/>
+A problem, unrelated to filenames, is the use of <code>winlaunch</code>
+to run Windows console applications. This is perfectly possible, and
+<code>winlaunch</code> will do filename conversions if appropriate, but
+Windows console applications do not always play nicely with the 
+Cygwin terminal. That isn't a limitation of <code>winlaunch</code>, but
+<code>winlaunch</code> does expose a problem which might otherwise not
+be noticed.
+<p/>
+A further complication is that the Cygwin shell will favour
+executables in the Windows and Windows\System directories over its
+own $PATH. You might want to write a script to launch, say, <code>notepad</code>
+at the prompt, but you won't be able to call it <code>notepad</code>,
+because the original <code>notepad</code> is in the Windows directory and
+will be run in preference to the script.
+
+<h3>winlauch and the Windows ShellExecute API</h3>
+
+As of version 0.2a, <code>winlaunch</code> will invoke the Windows API
+function <code>ShellExecute</code> if passed an argument that is 
+<i>not</i> an executable file. It can also do this for executables if
+you force it (see the description of the <code>--windows</code> switch
+below).
+<p/>
+The use of this API makes it possible to launch document files as well
+as executables, by having Windows execute the registered hander for that
+file type. Which registered handler is used depends on the file extension
+and the selected operation. For example, it is possible (sometimes) to
+print a document file directly from the command line by doing:
+
+<pre>
+$ winluanch --print /path/to/document.pdf
+</pre> 
+
+Without the <code>--print</code> switch, the default 'open' handler would
+be invoked. 
+<p/>
+How particular file types are handled is entirely a matter of Windows
+configuration -- all <code>winlaunch</code> does is convert filenames and
+invoke 
+<code>ShellExecute</code>. If there is no handler for a particular operation
+on a particular file type, the result might be an error message; it might
+equally be a silent failure.
+<p/>
+Note that Windows file associations work entirely on filename extension.
+<code>--print</code> might work on a file whose name ends in <code>.txt</code>,
+but fail on a file whose name ends in <code>.c</code>, even though both
+files contain plain text. This, again, is a limitation of the Windows
+shell.
+
+
+<h3>winlaunch command line</h3>
+
+The general format of the command line is:
+
+<pre>
+winlaunch [options] {executable} {arguments}
+</pre>
+
+Any switch options given to <code>winlaunch</code> must come before the
+executable -- any that come after are just passed to the executable as its
+own switches. So, for example:
+
+<pre>
+$winlaunch --debug /path/to/program.exe
+</pre>
+
+launches <code>program.exe</code> with <code>winluanch</code> in debug mode.
+
+<pre>
+$winlaunch /path/to/program.exe --debug
+</pre>
+
+launches <code>program.exe</code>, passing it '--debug' as a command-line
+switch. 
+
+<p/>
+<i>-d, --debug</i><br/>
+Enables debug mode. In this mode, <code>winlaunch</code> prints information
+about the filename conversions it is doing, and what is being passed to
+API calls. 
+<p/> 
+
+<i>-e, --explore</i><br/>
+Invokes Windows explorer. This option is only meaningful if the next argument
+is a directory name and, since opening explorer is the default action for
+directories, specifying <code>--explore</code> is rarely going to be necessary.
+<p/>
+
+<i>-f, --find</i><br/>
+Invokes the Windows shell search dialog. As with <code>--explore</code>, 
+this option is only meaningful if the next argument
+is a directory name.
+<p/>
+
+<i>--longhelp</i><br/>
+Prints some usage information.
+<p/>
+
+<i>-o, --open</i><br/>
+Invokes Windows default 'open' action on the file specific in the 
+next argument. 
+<p/>
+
+<i>-m, --minimize</i><br/>
+Runs the application with its main window minimized. This option is
+only meaningful when the Windows <code>ShellExecute</code> API is used
+to launch the executable (see <code>--windows</code>).
+<p/>
+
+<i>-p, --print</i><br/>
+Invokes Windows default 'print' action on the file specified in the next 
+argument. This action 
+will only succeed if there is an application registered to print files
+wth filename extensions matching the specified argument. 
+<p/>
+
+<i>-t, --edit</i><br/>
+Invokes Windows default 'edit' action on the file specified in the next 
+argument. This action 
+will only succeed if there is an application registered to edit files
+wth filename extensions matching the specified argument. In practice,
+the 'open' action and 'edit' action are usually handled by the same action,
+so specifying <code>--edit</code> explicitly is rarely necessary. 
+<p/>
+
+<i>-v, --version</i><br/>
+Show the version of <code>winlaunch</code> and exit
+<p/>
+
+<i>-w, --windows</i><br/>
+Forces <code>winlaunch</code> to use the Windows <code>ShellExecute</code>
+API rather than the standard <code>exec()</code> call. This API is always
+used when the argument to <code>winlaunch</code> is not a binary 
+executable. The <code>ShellExecute</code> API is slower, and more
+prone to problems involving spaces in filenames, than the use of
+<code>exec()</code>. However, specifying <code>--windows</code> does
+provide some additional control over how the executable is run, 
+such as the ability to run in a minimized window. 
+
+<p/>
+
+
+<h3>Installation</h3>
+
+WinLaunch is available for 32-bit and 64-bit versions of Cygwin, and
+most likely only the correct version will work. To install, 
+just copy <code>winlaunch.exe</code> or <code>winlaunch64.exe</code>
+to <code>/usr/bin</code>.
+A simple Makefile is provided in the source bundle, to rebuild the
+utility using <code>gcc</code>. Please note that the Makefile line
+<code>CFLAGS=-DWIN64</code> must be commented out to build the 32-bit version,
+even on a 32-bit system.
+
+<h3>Notes</h3>
+
+<i>Use of rundll32</i><br/>
+<code>winlaunch</code> can be used to launch DLL functions that take
+filename arguments, via <code>rundll32.exe</code>. For example,
+here is a script to launch the Windows photo viewer with a filename:
+
+<pre>
+winlaunch "/cygdrive/c/Windows/System32/rundll32.exe" "shimgvw.dll,ImageView_Fullscreen" "$@"
+</pre>
+<p/>
+
+<i>Synchronous and asynchronous launching</i><br/>
+<code>winlaunch</code> will launch Windows utilities synchronously, as would
+be standard practice when running a graphical application from the 
+prompt on a Unix system. To get the prompt back straight away, use
+'&amp;', either on your command line or in a script. An apparent
+exception to this principle arises for some Windows applications that
+prevent multiple instances being spawned, as is quite common in Windows
+programming. If the application simply interacts with an existing instance
+of that application, and then quits, this creates the illusion that it is
+being launched asynchronously.
+<p/>
+
+<i>Windows applications never intended to be run at the prompt</i><br/>
+Some Windows applications generate a lot of output to <code>stdout</code>
+and <code>stderr</code>, in the expectation that uses will not see it,
+because Windows applications are rarely run from a prompt.
+You might need to redirect <code>stdout</code> and/or <code>stderr</code>
+in your scripts to tame this verbosity.
+<p/>
+
+<i>Implicit quoting of arguments to Windows applications</i><br/>
+When using the Windows API to run and executable (see <code>--windows</code>)
+all arguments are silently expanded to begin and end with double-quotes.
+This is essential because the Windows API call takes its arguments as
+one long string and, if any arguments contain spaces, not quoting the
+arguments would lead to their being split up. This quoting process should
+have no user-visible side-effects.
+<p/>
+
+<i>Misleading error messages</i><br/>
+When using the Windows API to open document files, error reporting is only 
+as good as Windows provides. The message 'No association defined' indicates 
+a number of different error conditions, such as trying to use
+<code>--print</code> on a document type for which there is no print
+handler. 'Access denied' nearly always indicates a problem that is
+<i>not</i> related to file permissions. In fact, this error is commonly
+returned for no apparent reason (a problem which is widely discussed
+on Windows programming forums, and which is not fully understood).  
+<p/>
+
+<i>Working directory issues</i><br/>
+<code>winlaunch</code> does not change the working directory when launching
+and executable. If it did, then any filenames specified on the command-line
+would have to be absolute, as they would not be locatable as relative
+paths once the directory is changed.
+<p/>
+A few Windows applications need to be launched with a specific working
+directory, and do not work with <code>winlaunch</code> very cleanly.
+<p/>
+
+<h3>Legal stuff</h3>
+
+<code>winlaunch</code> is distributed according to the terms of the
+GNU Public Licence, version 2 -- free of charge and without warranty --
+in the hope that it will be useful. Essentially, you should feel free to 
+do with it whatever you see fit, other than claiming it as your own work.
+
+<h3>Changes</h3>
+
+0.2c<br/>
+- First 64-bit version 
+<p/>
+
+0.2b<br/>
+- Modification to prevent URLs being treated as filenames 
+<p/>
+
+0.2a<br/>
+- Replaced invocation of <code>cygpath</code> with use of Cygwin API calls.<br/>
+- Added support for <code>ShellExecute</code> calls</br>
+<p/>
+
+0.1a<br/>
+First public release.
+
+<h3>Downloads</h3>
+
+<ul>
+<li><a href="winlaunch-0.2.tar.gz">Source code</a></li>
+<li><a href="winlaunch.exe">Cygwin windows binary</a></li>
+<li><a href="winlaunch64.exe">Cygwin windows 64-bit binary</a></li>
+</ul>
+
+
+

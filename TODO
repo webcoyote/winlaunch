@@ -1,0 +1,22 @@
+paths e.g., dir1:dir2:
+c:\windows has priority over PATH
+Some console-mode native windows apps don't produce nice output in the cygwin
+shell
+Some console-mode native windows apps don't behave properly with respect to
+input, e.g., mplayer needs keypresses follwed by return
+will wait for child, as would for a Linux GUI app (use &)
+current directory (.) is unprocessed. Not all windows apps understand it.
+
+
+
+mp3tag will accept a directory name as argument
+
+
+Can be used with rundll commands, e.g:
+
+winlaunch "/cygdrive/c/Windows/System32/rundll32.exe" "shimgvw.dll,ImageView_Fullscreen" "$@"
+
+Note that the number of command line arguments is generally not variable in 
+cases like this. Specifying the wrong arguments can have odd effects.
+
+
